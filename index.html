@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Premium Snake</title>
+<style>
+  :root{
+    --bg1:#0f9999; --accent:#00e6b8; --muted:#9aa4ad;
+  }
+  html,body{height:100%;margin:0;font-family:Inter,system-ui,Arial,sans-serif;background:
+    linear-gradient(180deg,#468821 0%, #0b096b 100%);color:cyanff;display:flex;align-items:center;justify-content:center;}
+  .container{width:100%;max-width:520px;padding:18px;box-sizing:border-box;text-align:center;}
+  h1{margin:0 0 12px;font-size:24px;text-shadow:0 4px 20px rgba(0,0,0,0.6);}
+  #topBar{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px}
+  #score, #highScore{background:rgba(255,255,255,0.03);padding:8px 12px;border-radius:10px;font-weight:600}
+  .controls{display:flex;gap:8px}
+  .controls button{background:linear-gradient(180deg,var(--accent),#00cfa8);border:none;color:#012; padding:8px 12px;border-radius:10px;font-weight:700;cursor:pointer;box-shadow:0 6px 20px rgba(0,230,184,0.12)}
+  canvas{display:block;margin:0 auto;border-radius:12px;background:#081018;box-shadow:0 12px 40px rgba(0,0,0,0.6);border:3px solid rgba(0,230,184,0.08)}
+  /* joystick */
+  .joystick{position:relative;margin-top:14px;display:flex;flex-direction:column;align-items:center;gap:8px}
+  .joystick-row{display:flex;gap:14px}
+  .joy-btn{width:78px;height:78px;border-radius:50%;border:none;background:linear-gradient(180deg,#00c6ff,#0072ff);font-size:26px;cursor:pointer;box-shadow:0 10px 30px rgba(0,200,255,0.12);display:flex;align-items:center;justify-content:center;user-select:none;-webkit-tap-highlight-color:transparent}
+  .joy-btn:active{transform:scale(1.08)}
+  /* Overlay gameover */
+  .overlay{
+    position:fixed;left:0;top:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;
+    background:linear-gradient(180deg, rgba(0,0,0,0.6), rgba(0,0,0,0.8));z-index:50;backdrop-filter: blur(4px);
+  }
+  .panel{background:linear-gradient(180deg,#08121a,#061018);padding:22px;border-radius:14px;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,0.6);min-width:260px}
+  .panel h2{margin:0 0 8px;font-size:22px;color:#ff6b6b}
+  .panel p{margin:6px 0 16px;color:var(--muted)}
+  .panel button{padding:10px 16px;border-radius:10px;border:none;background:linear-gradient(180deg,#00e6b8,#00cfa8);color:#012;font-weight:800;cursor:pointer}
+  .hidden{display:none}
+  /* responsive */
+  @media(max-width:420px){
+    .joy-btn{width:64px;height:64px;font-size:22px}
+    canvas{width:320px;height:320px}
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <h1>🐍 Premium Snaked</h1>
+
+    <div id="topBar">
+      <div id="score">Score: 0</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <div id="highScore">High: 0</div>
+        <div class="controls">
+          <button id="pauseBtn">⏸ Pause</button>
+          <button id="resumeBtn">▶ Resume</button>
+          <button id="restartBtn">🔁 Restart</button>
+        </div>
+      </div>
+    </div>
+
+    <canvas id="gameCanvas" width="400" height="400"></canvas>
+
+    <!-- joystick (mobile) -->
+    <div class="joystick" aria-hidden="false">
+      <div class="joystick-row"><button id="upBtn" class="joy-btn">⬆️</button></div>
+      <div class="joystick-row">
+        <button id="leftBtn" class="joy-btn">⬅️</button>
+        <button id="downBtn" class="joy-btn">⬇️</button>
+        <button id="rightBtn" class="joy-btn">➡️</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Overlay Game Over -->
+  <div id="gameOverScreen" class="overlay hidden" role="dialog" aria-modal="true">
+    <div class="panel">
+      <h2>💀 Game Over</h2>
+      <p id="finalScoreText">Your Score: 0</p>
+      <div style="display:flex;gap:10px;justify-content:center">
+        <button id="overlayRestartBtn">Restart</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ---- Full working game.js (all buttons + overlay fixed) ---- */
+
+// Canvas & grid
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const BOX = 20;
+const COLS = Math.floor(canvas.width / BOX);
+const ROWS = Math.floor(canvas.height / BOX);
+
+// DOM
+const scoreEl = document.getElementById('score');
+const highScoreEl = document.getElementById('highScore');
+const pauseBtn = document.getElementById('pauseBtn');
+const resumeBtn = document.getElementById('resumeBtn');
+const restartBtn = document.getElementById('restartBtn');
+const gameOverScreen = document.getElementById('gameOverScreen');
+const finalScoreText = document.getElementById('finalScoreText');
+const overlayRestartBtn = document.getElementById('overlayRestartBtn');
+
+// Joystick buttons
+const upBtn = document.getElementById('upBtn');
+const downBtn = document.getElementById('downBtn');
+const leftBtn = document.getElementById('leftBtn');
+const rightBtn = document.getElementById('rightBtn');
+
+let snake = [];
+let direction = 'RIGHT';        // current moving direction
+let pendingDirection = null;    // direction set by input, applied at next move
+
+let food = null;
+let score = 0;
+let highScore = Number(localStorage.getItem('snakeHighScore') || 0);
+let moveInterval = 110; // ms between moves (lower = faster)
+let lastMoveTime = 0;
+let animationId = null;
+let running = false;
+let paused = false;
+
+// simple sound (optional)
+const eatAudio = new Audio('https://cdn.pixabay.com/download/audio/2021/09/13/audio_7e0f0db0a2.mp3?filename=pop-94319.mp3');
+const overAudio = new Audio('https://cdn.pixabay.com/download/audio/2021/09/13/audio_9f3ebcdd56.mp3?filename=error-2-126514.mp3');
+
+// utilities
+function randGridPos(){
+  return {
+    x: Math.floor(Math.random() * COLS) * BOX,
+    y: Math.floor(Math.random() * ROWS) * BOX
+  };
+}
+function samePos(a,b){return a.x===b.x && a.y===b.y;}
+function spawnFood(){
+  let pos;
+  do {
+    pos = randGridPos();
+    // avoid spawning on snake
+  } while (snake.some(part => samePos(part,pos)));
+  food = pos;
+}
+
+// init/reset
+function initGame(){
+  // start snake with length 3 centered
+  const startX = Math.floor(COLS/2) * BOX;
+  const startY = Math.floor(ROWS/2) * BOX;
+  snake = [
+    {x:startX, y:startY},
+    {x:startX - BOX, y:startY},
+    {x:startX - 2*BOX, y:startY}
+  ];
+  direction = 'RIGHT';
+  pendingDirection = null;
+  spawnFood();
+  score = 0;
+  moveInterval = 110;
+  lastMoveTime = performance.now();
+  paused = false;
+  running = true;
+  gameOverScreen.classList.add('hidden');
+  updateScoreUI();
+  // start loop
+  cancelAnimationFrame(animationId);
+  animationId = requestAnimationFrame(loop);
+}
+
+// UI updates
+function updateScoreUI(){
+  scoreEl.textContent = 'Score: ' + score;
+  highScoreEl.textContent = 'High: ' + highScore;
+}
+
+// input helpers — prevent reversing into self
+function setPendingDir(dir){
+  // opposite pairs
+  const opp = { 'LEFT':'RIGHT','RIGHT':'LEFT','UP':'DOWN','DOWN':'UP' };
+  // ignore if trying to reverse immediately when snake length>1
+  if (opp[dir] === direction) return;
+  pendingDirection = dir;
+}
+
+// keyboard
+window.addEventListener('keydown', (e)=>{
+  if (e.key === 'ArrowUp') setPendingDir('UP');
+  if (e.key === 'ArrowDown') setPendingDir('DOWN');
+  if (e.key === 'ArrowLeft') setPendingDir('LEFT');
+  if (e.key === 'ArrowRight') setPendingDir('RIGHT');
+});
+
+// joystick (both click and touchstart)
+[['upBtn','UP'],['downBtn','DOWN'],['leftBtn','LEFT'],['rightBtn','RIGHT']].forEach(([id,dir])=>{
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.addEventListener('click', ()=> setPendingDir(dir));
+  el.addEventListener('touchstart', (ev)=>{ ev.preventDefault(); setPendingDir(dir); }, {passive:false});
+});
+
+// top control buttons
+pauseBtn.addEventListener('click', ()=>{
+  if(!running) return;
+  paused = true;
+});
+resumeBtn.addEventListener('click', ()=>{
+  if(!running) return;
+  if(paused){ paused = false; lastMoveTime = performance.now(); animationId = requestAnimationFrame(loop); }
+});
+restartBtn.addEventListener('click', ()=> initGame());
+overlayRestartBtn.addEventListener('click', ()=> initGame());
+
+// draw functions
+function clear(){
+  ctx.fillStyle = '#041018';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+}
+function drawGrid(){ /* optional: small grid lines if you want */ }
+function drawFood(){
+  ctx.fillStyle = '#ff6b6b';
+  const cx = food.x + BOX/2, cy = food.y + BOX/2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, BOX/2 - 2, 0, Math.PI*2);
+  ctx.fill();
+}
+function drawSnake(){
+  for(let i=0;i<snake.length;i++){
+    const p = snake[i];
+    // rainbow-ish color by index
+    const hue = (i * 25) % 360;
+    ctx.fillStyle = `hsl(${hue} 80% 50%)`;
+    ctx.fillRect(p.x, p.y, BOX, BOX);
+  }
+}
+
+// step (one move)
+function step(){
+  // apply pending direction immediately (so input feels instant for next move)
+  if(pendingDirection) {
+    direction = pendingDirection;
+    pendingDirection = null;
+  }
+
+  // compute new head
+  const head = { x: snake[0].x, y: snake[0].y };
+  if(direction === 'LEFT') head.x -= BOX;
+  if(direction === 'RIGHT') head.x += BOX;
+  if(direction === 'UP') head.y -= BOX;
+  if(direction === 'DOWN') head.y += BOX;
+
+  // collisions: walls
+  if(head.x < 0 || head.y < 0 || head.x >= canvas.width || head.y >= canvas.height){
+    return false; // game over
+  }
+  // collision with self
+  for(let i=0;i<snake.length;i++){
+    if(samePos(head, snake[i])) return false;
+  }
+
+  snake.unshift(head);
+
+  // eat
+  if(samePos(head, food)){
+    // play sound (catch errors)
+    try{ eatAudio.currentTime = 0; eatAudio.play(); } catch(e){}
+    score += 1;
+    // speed up slightly every 3 points
+    if(score % 3 === 0 && moveInterval > 50) moveInterval -= 6;
+    spawnFood();
+  } else {
+    snake.pop();
+  }
+
+  // update high score early
+  if(score > highScore){
+    highScore = score;
+    localStorage.setItem('snakeHighScore', highScore);
+  }
+  updateScoreUI();
+  return true;
+}
+
+// main loop (uses requestAnimationFrame for smooth rendering)
+function loop(timestamp){
+  if(!running) return;
+  animationId = requestAnimationFrame(loop);
+
+  if(paused) {
+    // while paused, just render current frame (so user sees state)
+    render();
+    return;
+  }
+
+  if(!lastMoveTime) lastMoveTime = timestamp;
+  const elapsed = timestamp - lastMoveTime;
+  if(elapsed >= moveInterval){
+    // do a move step
+    const alive = step();
+    lastMoveTime = timestamp - (elapsed % moveInterval);
+    if(!alive){
+      // game over
+      running = false;
+      // show overlay
+      finalScoreText.textContent = `Your Score: ${score}`;
+      gameOverScreen.classList.remove('hidden');
+      try{ overAudio.currentTime = 0; overAudio.play(); } catch(e){}
+      cancelAnimationFrame(animationId);
+      return;
+    }
+  }
+  // always render after possible step (so input feels immediate)
+  render();
+}
+
+// render function draws everything
+function render(){
+  clear();
+  drawFood();
+  drawSnake();
+  // small UI draw (score already in top bar)
+}
+
+// start once loaded
+initGame();
+
+</script>
+</body>
+</html>
